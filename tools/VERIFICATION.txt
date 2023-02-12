@@ -1,0 +1,19 @@
+﻿
+Note: Include this file if including binaries you have the right to distribute. 
+Otherwise delete. this file. If you are the software author, you can change this
+mention you are the author of the software.
+
+1.  Download the zip:
+
+    x64: #REPLACE_URL#
+
+2.  Calculate Checksum:
+    
+    You can use one of the following methods to obtain the checksum: 
+    - Use powershell function 'Get-FileHash'
+    - Use Chocolatey utility 'checksum.exe'
+    
+    
+3.  Verify against Checksum:
+
+    checksum64: #REPLACE_CHECKSUM#

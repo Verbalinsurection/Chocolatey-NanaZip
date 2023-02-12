@@ -1,0 +1,1 @@
+﻿Get-AppxPackage -Name 40174MouriNaruto.NanaZip | Remove-AppxPackage
