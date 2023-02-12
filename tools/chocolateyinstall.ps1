@@ -10,11 +10,6 @@ if ($WindowsVersion.Major -ne "10") {
   throw "This package requires Windows 10."
 }
 
-$IsCorrectBuild=[Environment]::OSVersion.Version.Build
-if ($IsCorrectBuild -lt "19041") {
-  throw "This package requires at least Windows 10 version 2004/OS build 19041.x."
-}
-
 $AppxPackageName = "40174MouriNaruto.NanaZip"
 
 if ($PreRelease -match "True") {
