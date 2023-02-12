@@ -175,3 +175,10 @@ choco pack
 
 ## Restore files
 RestoreFiles $backupedFiles
+
+## Push choco package ##
+$confirmation = Read-Host "Push package [Y/n]?"
+$confirmation = ('y',$confirmation)[[bool]$confirmation]
+if($confirmation -eq 'n') {exit}
+$packFileName = $packageId + '.' + $latestRelease.Version + '.nupkg'
+choco push $($packFileName)

@@ -1,2 +1,4 @@
 **/commands.txt
 *.nupkg
+
+*.msixbundle
