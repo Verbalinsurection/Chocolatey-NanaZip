@@ -22,7 +22,7 @@ function getNormVerion {
     if($nver.Build -eq -1) {$nver = [Version]::new($nver.Major, $nver.Minor, 0, 0)}
     if($nver.Revision -eq -1) {$nver = [Version]::new($nver.Major, $nver.Minor, $nver.Build, 0)}
   }
-  return "$($nver.Major).$($nver.Minor).$($nver.Build).$($nver.Revision)"
+  return "$($nver.Major).$($nver.Minor).$($nver.Build)"
 }
 
 function ReplaceInFile {
