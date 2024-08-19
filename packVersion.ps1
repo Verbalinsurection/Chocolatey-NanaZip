@@ -58,7 +58,7 @@ function GetGithubInfos {
 
   Write-Debug "  Find asset x86_64: $($winAsset64.name)"
 
-  Remove-Item -Path tools\40174MouriNaruto.NanaZip_*
+  Remove-Item -Path tools\*NanaZip_*
   Invoke-WebRequest -Uri $winAsset64.browser_download_url -OutFile "tools/$($winAsset64.name)"
 
   $FileHash64 = Get-FileHash ("tools/$($winAsset64.name)")
