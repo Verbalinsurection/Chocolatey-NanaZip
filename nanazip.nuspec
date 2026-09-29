@@ -5,13 +5,13 @@
     <version>#REPLACE_VERSION#</version>
     <title>NanaZip</title>
     <authors>M2Team</authors>
-	  <owners>Verbalinsurection</owners>
+    <owners>Verbalinsurection</owners>
     <projectUrl>https://github.com/M2Team/NanaZip</projectUrl>
     <packageSourceUrl>https://github.com/Verbalinsurection/Chocolatey-NanaZip</packageSourceUrl>
-	  <licenseUrl>https://github.com/M2Team/NanaZip/blob/main/License.md</licenseUrl>
-	  <requireLicenseAcceptance>true</requireLicenseAcceptance>
-    <iconUrl>https://rawcdn.githack.com/M2Team/NanaZip/master/Assets/NanaZip.png</iconUrl>
-    <tags>nanazip zip archive</tags>
+    <licenseUrl>https://github.com/M2Team/NanaZip/blob/main/License.md</licenseUrl>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <iconUrl>https://raw.githubusercontent.com/M2Team/NanaZip/main/Assets/NanaZip.png</iconUrl>
+    <tags>nanazip 7zip zip archive compression archiver msix zstd foss</tags>
     <summary>The 7-Zip derivative intended for the modern Windows experience</summary>
     <releaseNotes>#REPLACE_RELEASE_INFO#</releaseNotes>
     <projectSourceUrl>https://github.com/M2Team/NanaZip</projectSourceUrl>
@@ -20,39 +20,31 @@
 NanaZip is an open source file archiver intended for the modern Windows 
 experience, forked from the source code of well-known open source file archiver
 7-Zip.
-      
+
 **All kinds of contributions will be appreciated. All suggestions, pull 
 requests and issues are welcome.**
-      
+
 ## Features
-      
-- Inherit all features from 7-Zip 22.01.
+
+- Inherit all features from 7-Zip, 7-Zip ZS and 7-Zip NSIS.
+- Support the dark mode and the Mica effect for the GUI components.
 - Packaging with MSIX for modern deployment experience.
 - Support the context menu in Windows 10/11 File Explorer.
-- Enable NSIS script decompiling support for the NSIS archives. (Merged from 
-  [7-Zip NSIS branch](https://github.com/myfreeer/7z-build-nsis).)
 - Provide 7-Zip execution alias for helping users to migrate to NanaZip.
-- Support the Brotli, Fast-LZMA2, Lizard, LZ4, LZ5 and Zstandard codecs. (Merged 
-  from [7-Zip ZS branch](https://github.com/mcmilk/7-Zip-zstd).)
 - Support the Per-Monitor DPI-Aware for all GUI components.
 - Support the i18n for GUI edition of Self Extracting Executable.
-- Integrate the following HASH algorithms to NanaZip from RHash (AICH, BLAKE2b,
-  BTIH, ED2K, EDON-R 224, EDON-R 256, EDON-R 384, EDON-R 512, GOST R 34.11-94, 
-  GOST R 34.11-94 CryptoPro, GOST R 34.11-2012 256, GOST R 34.11-2012 512, 
-  HAS-160, RIPEMD-160, SHA-224, SHA3-224, SHA3-256, SHA3-384, SHA3-512, 
-  Snefru-128, Snefru-256, Tiger, Tiger2, TTH, Whirlpool) and xxHash 
-  (XXH3_64bits, XXH3_128bits).
-- Enable Control Flow Guard (CFG) to all target binaries for mitigating ROP 
-  attacks.
-- Mark all x86 and x64 target binaries as compatible with Control-flow 
-  Enforcement Technology (CET) Shadow Stack.
-- Strict handle checks at runtime to block the use of invalid handles.
-- Disable dynamic code generation in Release builds prevents generating 
-  malicious code at runtime.
-- Block loading unexpected libraries from remote sources at runtime.
-- Enable Package Integrity Check.
-- Enable EH Continuation Metadata.
-- Enable Signed Returns.</description>
+- Provide the Smart Extraction feature and the Open folder after extraction option.
+- Propagates Mark-of-the-Web to all files by default.
+- Provide additional hash algorithms (BLAKE2b, SHA-3, xxHash, SM3, Whirlpool and more).
+- Provide additional codecs (Brotli, Fast-LZMA2, Lizard, LZ4, LZ5, Zstandard) and 
+  read-only support for several image and archive formats (UFS/UFS2, ROMFS, asar, WASM and more).
+- Enable Control Flow Guard (CFG), Control-flow Enforcement Technology (CET) 
+  Shadow Stack, strict handle checks and Package Integrity Check to harden the binaries.
+
+## Notes
+
+- The package is installed for the current user through the MSIX bundle published 
+  on the NanaZip GitHub releases.</description>
   </metadata>
   <files>
     <file src="tools\**" target="tools" />
