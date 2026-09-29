@@ -40,7 +40,7 @@ if ([version]$latest -le [version]$current) {
   return
 }
 
-$branch = "release/nanazip-$latest"
+$branch = "release/nanazip-$latest-t4"
 
 # Native commands do not honor $ErrorActionPreference: fail on any non-zero exit code.
 function Invoke-Native {
