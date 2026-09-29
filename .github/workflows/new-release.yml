@@ -15,8 +15,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: master
 
       - name: Open a pull request if a new stable release exists
         shell: pwsh
