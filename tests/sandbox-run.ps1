@@ -10,7 +10,13 @@ $oldVersion = $config.OldVersion
 $results = [ordered]@{}
 function Step($name, [scriptblock]$body) {
   Write-Host "`n=== $name ===" -ForegroundColor Cyan
-  try { $ok = & $body } catch { Write-Host $_ -ForegroundColor Red; $ok = $false }
+  # The script block also emits native command output (choco...): show it, and take the status
+  # only from the last emitted value, which must be exactly $true.
+  try {
+    $out = @(& $body)
+    if ($out.Count -gt 1) { $out[0..($out.Count - 2)] | Out-Host }
+    $ok = ($out.Count -gt 0) -and ($out[-1] -is [bool]) -and $out[-1]
+  } catch { Write-Host $_ -ForegroundColor Red; $ok = $false }
   $results[$name] = [bool]$ok
   Write-Host ("{0}: {1}" -f $name, $(if ($ok) { 'OK' } else { 'FAILED' })) -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
 }
@@ -21,13 +27,18 @@ function NanaZipVersion {
   if ($pkg) { return ([version]$pkg.Version).ToString(3) }
   return $null
 }
-# Prints the installed version (Appx + Chocolatey) and returns whether it matches $expected ($null = not installed)
+# Prints the installed version (Appx + Chocolatey) and returns $true only if BOTH match $expected
+# ($null = not installed: no Appx package and no Chocolatey registration)
 function CheckVersion($expected) {
   $actual = NanaZipVersion
+  $chocoLines = @(choco list nanazip --limit-output)
+  $chocoOk = ($LASTEXITCODE -eq 0)
+  $chocoActual = @($chocoLines | Where-Object { $_ -match '^nanazip\|' }) -join ''
   Write-Host ("  Appx version       : {0}" -f $(if ($actual) { $actual } else { '<not installed>' }))
-  Write-Host ("  Chocolatey version : {0}" -f ((choco list nanazip --limit-output) -join ''))
+  Write-Host ("  Chocolatey version : {0}" -f $(if ($chocoActual) { $chocoActual } else { '<not installed>' }))
   Write-Host ("  Expected           : {0}" -f $(if ($expected) { $expected } else { '<not installed>' }))
-  return ($actual -eq $expected)
+  $chocoExpected = if ($expected) { "nanazip|$expected" } else { '' }
+  return [bool](($actual -eq $expected) -and $chocoOk -and ($chocoActual -eq $chocoExpected))
 }
 
 Step 'Install Chocolatey' {

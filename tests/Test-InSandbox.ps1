@@ -51,17 +51,20 @@ if ($OldPackage) { Copy-Item $OldPackage $pkgDir }
 Copy-Item (Join-Path $PSScriptRoot 'sandbox-run.ps1') $pkgDir
 
 $wsb = Join-Path $work 'nanazip-test.wsb'
+# Paths are written into XML: escape &, <, >, quotes
+$pkgDirXml   = [System.Security.SecurityElement]::Escape($pkgDir)
+$resultsXml  = [System.Security.SecurityElement]::Escape($results)
 @"
 <Configuration>
   <Networking>Enable</Networking>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>$pkgDir</HostFolder>
+      <HostFolder>$pkgDirXml</HostFolder>
       <SandboxFolder>C:\pkg</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
     <MappedFolder>
-      <HostFolder>$results</HostFolder>
+      <HostFolder>$resultsXml</HostFolder>
       <SandboxFolder>C:\results</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>
