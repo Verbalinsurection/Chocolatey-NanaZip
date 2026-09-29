@@ -14,8 +14,9 @@ function getNormVerion {
   param (
     [string]$version
   )
+  $version = $version.TrimStart('v')
   if ($version.length -lt 3) {
-    $nver = [Version]::new($version, 0, 0, 0)
+    $nver = [Version]::new([int]$version, 0, 0, 0)
   } else {
     $nver = [Version] $version
     if($nver.Minor -eq -1) {$nver = [Version]::new($nver.Major, 0, 0, 0)}
@@ -33,11 +34,12 @@ function ReplaceInFile {
   )
 
   $utf8 = New-Object System.Text.UTF8Encoding $false
-  $RawData = Get-Content $FilePath -Raw
+  $fullPath = Join-Path $PSScriptRoot $FilePath
+  $RawData = [System.IO.File]::ReadAllText($fullPath, $utf8)
   for ($index = 0; $index -lt $SrcText.count; $index++) {
-      $RawData = $RawData.replace($SrcText[$index], $TargetText[$index])
+    $RawData = $RawData.Replace($SrcText[$index], $TargetText[$index])
   }
-  Set-Content -Value $utf8.GetBytes($RawData) -Encoding Byte -Path $FilePath
+  [System.IO.File]::WriteAllText($fullPath, $RawData, $utf8)
 }
 
 function GetGithubInfos {
@@ -45,31 +47,40 @@ function GetGithubInfos {
     [string]$repo
   )
 
+  $url = "https://api.github.com/repos/$repo/releases?per_page=20"
+  Write-Debug "Get Github infos: $url"
+  $headers = @{}
+  if ($env:GITHUB_TOKEN) { $headers.Authorization = "Bearer $env:GITHUB_TOKEN" }
+  $releases = Invoke-RestMethod -Uri $url -Headers $headers
+
   if ($fversion -eq [string]::Empty) {
-    Write-Debug "Get Github infos: https://api.github.com/repos/$repo/releases?per_page=5"
-    $releasePage = (Invoke-WebRequest "https://api.github.com/repos/$repo/releases?per_page=5" | ConvertFrom-Json)
-    $releaseFiltered = ($releasePage | Select-Object tag_name, prerelease, html_url, assets | Where-Object {$_.prerelease -match "False"})[0]
+    $release = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
   } else {
-    Write-Debug "Get Github infos: https://api.github.com/repos/$repo/releases for version $fversion"
-    $releasePage = (Invoke-WebRequest "https://api.github.com/repos/$repo/releases" | ConvertFrom-Json)
-    $releaseFiltered = ($releasePage | Select-Object tag_name, prerelease, html_url, assets | Where-Object {$_.tag_name -match $fversion})[0]
+    $release = $releases | Where-Object { $_.tag_name -eq $fversion -or $_.tag_name -eq "v$fversion" } | Select-Object -First 1
   }
-  $winAsset64 = $releaseFiltered.assets | Select-Object id, name, browser_download_url | Where-Object {$_.name -match "msixbundle"}
+  if (-not $release) { throw "Release not found on $repo" }
 
-  Write-Debug "  Find asset x86_64: $($winAsset64.name)"
+  $asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
+  if (-not $asset) { throw "Asset NanaZip_*.msixbundle not found in release $($release.tag_name)" }
+  Write-Debug "  Find asset x86_64: $($asset.name)"
 
-  Remove-Item -Path tools\*NanaZip_*
-  Invoke-WebRequest -Uri $winAsset64.browser_download_url -OutFile "tools/$($winAsset64.name)"
-
-  $FileHash64 = Get-FileHash ("tools/$($winAsset64.name)")
-  Write-Debug "  FileHash x86_64: $($FileHash64.Hash)"
   return @{
-    Version     = getNormVerion $releaseFiltered.tag_name
-    ReleaseUrl  = $releaseFiltered.html_url
-    URL64       = $winAsset64.browser_download_url
-    SHA64       = $FileHash64.Hash
-    FileName   = $winAsset64.name
+    Version    = getNormVerion $release.tag_name
+    ReleaseUrl = $release.html_url
+    URL64      = $asset.browser_download_url
+    FileName   = $asset.name
   }
+}
+
+function DownloadAsset {
+  param ($release)
+
+  Remove-Item -Path (Join-Path $PSScriptRoot 'tools\*.msixbundle') -ErrorAction SilentlyContinue
+  $target = Join-Path $PSScriptRoot "tools\$($release.FileName)"
+  Invoke-WebRequest -Uri $release.URL64 -OutFile $target
+  $hash = (Get-FileHash $target).Hash
+  Write-Debug "  FileHash x86_64: $hash"
+  return $hash
 }
 
 function GetActual {
@@ -80,8 +91,8 @@ function GetActual {
   Write-Debug "Get Chocolatey infos: $packageId"
   $chocoVersion = choco search $packageId --by-id-only --exact --limit-output
   if(!$chocoVersion) {
-    Write-Error "Unable to find package on Chocolatey"
-    return '0.0.0.0'
+    Write-Warning "Unable to find package on Chocolatey"
+    return '0.0.0'
   }
   Write-Debug " Find Chocolatey infos: $chocoVersion"
   return $chocoVersion.split('|')[1]
@@ -93,30 +104,31 @@ function BackupFiles {
   )
 
   Write-Debug "Backup $($FilesToBackup.Count) files"
-  $backupedFiles = New-Object System.Collections.Generic.List[System.Object]
-  New-Item -Name "bck" -ItemType "directory" | out-null
+  $backupDir = Join-Path $PSScriptRoot 'bck'
+  if (Test-Path $backupDir) { throw "Directory 'bck' already exists (previous run interrupted?). Restore files from it and remove it." }
+  New-Item -Path $backupDir -ItemType Directory | Out-Null
 
-  for ($index = 0; $index -lt $FilesToBackup.count; $index++) {
-    $FileToBackup = $FilesToBackup[$index].Replace('/', '_')
-    Write-Debug " Copy-Item $($FilesToBackup[$index]) -Destination bck/$FileToBackup"
-    Copy-Item $FilesToBackup[$index] -Destination "bck/$FileToBackup"
-    $backupedFiles.Add($FileToBackup)
+  $backups = [ordered]@{}
+  foreach ($file in $FilesToBackup) {
+    $backupFile = Join-Path $backupDir ($file.Replace('/', '_'))
+    Write-Debug " Copy-Item $file -Destination $backupFile"
+    Copy-Item (Join-Path $PSScriptRoot $file) -Destination $backupFile
+    $backups[$file] = $backupFile
   }
-  return $backupedFiles
+  return $backups
 }
 
 function RestoreFiles {
   param (
-    [string[]]$FilesToRestore
+    $Backups
   )
 
-  Write-Debug "Restore $($FilesToRestore.Count) files"
-  for ($index = 0; $index -lt $FilesToRestore.count; $index++) {
-    $FileToRestore = $FilesToRestore[$index].Replace('_', '/')
-    Write-Debug " Copy-Item bck/$($FilesToRestore[$index]) -Destination $FileToRestore -Force"
-    Copy-Item "bck/$($FilesToRestore[$index])" -Destination $FileToRestore -Force
+  Write-Debug "Restore $($Backups.Count) files"
+  foreach ($file in $Backups.Keys) {
+    Write-Debug " Copy-Item $($Backups[$file]) -Destination $file -Force"
+    Copy-Item $Backups[$file] -Destination (Join-Path $PSScriptRoot $file) -Force
   }
-  Remove-Item "bck" -Recurse
+  Remove-Item (Join-Path $PSScriptRoot 'bck') -Recurse
 }
 
 ###############################################################################
@@ -137,11 +149,14 @@ Write-Host "Chocolatey version  : $actualVersion"
 Write-Host "Github repo version : $($latestRelease.Version)"
 
 ## Check if packaging is needed ##
-if($latestRelease.Version -like $actualVersion -And !$force) {
+if([version]$latestRelease.Version -le [version]$actualVersion -And !$force) {
   Write-Warning "No new version available"
   exit
 }
 Write-Warning "Update available !"
+
+## Download asset and compute checksum ##
+$latestRelease.SHA64 = DownloadAsset $latestRelease
 
 ## Display release informations ##
 Write-Host "--------------------------------------------------"
@@ -156,29 +171,35 @@ if(!$noPrompt) {
 }
 
 ## Backup files
-$backupedFiles = BackupFiles $filesToUpdate
+$backups = BackupFiles $filesToUpdate
 
-## Replace informations in files ##
-for ($index = 0; $index -lt $filesToUpdate.count; $index++) {
-  Write-Debug "Update $($filesToUpdate[$index])"
-  ReplaceInFile -FilePath $filesToUpdate[$index] `
-                -SrcText '#REPLACE_VERSION#', '#REPLACE_RELEASE_INFO#', '#REPLACE_URL#', '#REPLACE_CHECKSUM#', '#REPLACE_FILENAME#' `
-                -TargetText $latestRelease.Version, $latestRelease.ReleaseUrl, $latestRelease.URL64, $latestRelease.SHA64, $latestRelease.Filename
+try {
+  ## Replace informations in files ##
+  foreach ($file in $filesToUpdate) {
+    Write-Debug "Update $file"
+    ReplaceInFile -FilePath $file `
+                  -SrcText '#REPLACE_VERSION#', '#REPLACE_RELEASE_INFO#', '#REPLACE_URL#', '#REPLACE_CHECKSUM#', '#REPLACE_FILENAME#' `
+                  -TargetText $latestRelease.Version, $latestRelease.ReleaseUrl, $latestRelease.URL64, $latestRelease.SHA64, $latestRelease.FileName
+  }
+
+  ## Pack choco package ##
+  if(!$noPrompt) {
+    Read-Host -Prompt "Files updated, press any key to continue"
+  }
+  Write-Debug "Starting 'choco pack'"
+  Push-Location $PSScriptRoot
+  try { choco pack } finally { Pop-Location }
+  if ($LASTEXITCODE -ne 0) { throw "choco pack failed (exit code $LASTEXITCODE)" }
+} finally {
+  ## Restore files
+  RestoreFiles $backups
 }
-
-## Pack choco package ##
-if(!$noPrompt) {
-  Read-Host -Prompt "Files updated, press any key to continue"
-}
-Write-Debug "Starting 'choco pack'"
-choco pack
-
-## Restore files
-RestoreFiles $backupedFiles
 
 ## Push choco package ##
-$confirmation = Read-Host "Push package [Y/n]?"
-$confirmation = ('y',$confirmation)[[bool]$confirmation]
-if($confirmation -eq 'n') {exit}
-$packFileName = $packageId + '.' + $latestRelease.Version + '.nupkg'
-choco push $($packFileName)
+if(!$noPrompt) {
+  $confirmation = Read-Host "Push package [Y/n]?"
+  $confirmation = ('y',$confirmation)[[bool]$confirmation]
+  if($confirmation -eq 'n') {exit}
+}
+$packFileName = Join-Path $PSScriptRoot ($packageId + '.' + $latestRelease.Version + '.nupkg')
+choco push $packFileName
