@@ -49,6 +49,26 @@ function Invoke-Native {
   return $output
 }
 
+# The CI run started by the dispatch is not attached to the pull request (empty checks list), so wait for
+# its end and report the result in a pull request comment. Never fatal.
+function Write-CiResult([string]$Branch, [string]$PullRequest) {
+  try {
+    $run = $null
+    for ($i = 0; $i -lt 12 -and -not $run; $i++) {
+      Start-Sleep -Seconds 5
+      $json = (Invoke-Native gh run list --branch $Branch --event workflow_dispatch --limit 1 --json 'databaseId,url') -join "`n" | ConvertFrom-Json
+      $run = foreach ($r in $json) { $r }
+    }
+    if (-not $run) { throw 'CI run not found' }
+    Invoke-Native gh run watch $run.databaseId --interval 5 | Out-Null
+    $conclusion = ((Invoke-Native gh run view $run.databaseId --json conclusion) -join "`n" | ConvertFrom-Json).conclusion
+    Invoke-Native gh pr comment $PullRequest --body "**CI: $conclusion** - $($run.url)" | Out-Null
+    Write-Host "CI result posted on the pull request: $conclusion"
+  } catch {
+    Write-Warning "Could not report the CI result on the pull request: $_"
+  }
+}
+
 if ($DryRun) {
   Write-Host "[DryRun] would create branch $branch, bump version.txt to $latest and open a pull request."
   return
@@ -70,6 +90,7 @@ if ($prs.Count -gt 0) {
   if (-not $ciRuns) {
     Write-Host 'No CI run found for this branch, starting it.'
     Invoke-Native gh workflow run ci.yml --ref $branch | Out-Null
+    Write-CiResult $branch ([string]$prs[0].number)
   }
   return
 }
@@ -107,8 +128,9 @@ New stable NanaZip release detected: **$($release.tag_name)** (was ``$current``)
 - [ ] A local ``choco upgrade nanazip -s . -f``
 - [ ] Merge this PR once the package is published
 "@
-$body | gh pr create --base master --head $branch --title "Update NanaZip to $latest" --body-file -
+$prUrl = $body | gh pr create --base master --head $branch --title "Update NanaZip to $latest" --body-file -
 if ($LASTEXITCODE -ne 0) { throw "gh pr create failed with exit code $LASTEXITCODE" }
+Write-Host "Pull request: $prUrl"
 
 # Pull requests opened with GITHUB_TOKEN do not trigger workflows: run the checks explicitly.
 Invoke-Native gh workflow run ci.yml --ref $branch | Out-Null
@@ -130,3 +152,5 @@ try {
 } catch {
   Write-Warning "Could not remove the run waiting for approval: $_"
 }
+
+Write-CiResult $branch $prUrl
