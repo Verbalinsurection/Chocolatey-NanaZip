@@ -56,9 +56,15 @@ if ($DryRun) {
 
 # Every step is idempotent so that a partially failed run is repaired by the next one.
 $branchExists = [bool](Invoke-Native git ls-remote --heads origin $branch)
-$prCount = [int](Invoke-Native gh pr list --head $branch --state all --json number --jq 'length')
-if ($prCount -gt 0) {
-  Write-Host "A pull request already exists for $branch."
+$prsJson = ((Invoke-Native gh pr list --head $branch --state all --json 'number,state') -join "`n") | ConvertFrom-Json
+$prs = @(foreach ($pr in $prsJson) { $pr })
+if ($prs.Count -gt 0) {
+  # Closed or merged: already handled (the branch may have been deleted), never start anything.
+  if (-not ($prs | Where-Object { $_.state -eq 'OPEN' })) {
+    Write-Host "The pull request for $branch was already handled ($($prs[0].state)), nothing to do."
+    return
+  }
+  Write-Host "A pull request is already open for $branch."
   # Pull requests opened with GITHUB_TOKEN do not trigger workflows: make sure the checks were started.
   $ciRuns = @(Invoke-Native gh run list --branch $branch --json workflowName --jq '.[].workflowName') -contains 'CI'
   if (-not $ciRuns) {
@@ -67,7 +73,6 @@ if ($prCount -gt 0) {
   }
   return
 }
-
 $tmp = Join-Path ([IO.Path]::GetTempPath()) $asset.name
 Write-Host "Downloading $($asset.browser_download_url)"
 Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp
@@ -107,3 +112,21 @@ if ($LASTEXITCODE -ne 0) { throw "gh pr create failed with exit code $LASTEXITCO
 
 # Pull requests opened with GITHUB_TOKEN do not trigger workflows: run the checks explicitly.
 Invoke-Native gh workflow run ci.yml --ref $branch | Out-Null
+
+# A pull request opened by the bot also starts a pull_request run that waits for a manual approval
+# ("action_required"). The run dispatched above does the same checks, so remove the pending one
+# (it can appear a few seconds after the pull request is created).
+try {
+  for ($i = 0; $i -lt 6; $i++) {
+    Start-Sleep -Seconds 5
+    $runs = (Invoke-Native gh run list --branch $branch --event pull_request --json 'databaseId,conclusion') -join "`n" | ConvertFrom-Json
+    $pending = @($runs | Where-Object { $_.conclusion -eq 'action_required' })
+    foreach ($run in $pending) {
+      Write-Host "Removing run $($run.databaseId) waiting for approval."
+      Invoke-Native gh run delete $run.databaseId | Out-Null
+    }
+    if ($pending.Count -gt 0) { break }
+  }
+} catch {
+  Write-Warning "Could not remove the run waiting for approval: $_"
+}
