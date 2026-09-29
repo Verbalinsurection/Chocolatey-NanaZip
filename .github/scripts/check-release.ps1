@@ -41,30 +41,50 @@ if ([version]$latest -le [version]$current) {
 }
 
 $branch = "release/nanazip-$latest"
-if (-not $DryRun) {
-  if (git ls-remote --heads origin $branch) {
-    Write-Host "Branch $branch already exists, nothing to do."
-    return
-  }
+
+# Native commands do not honor $ErrorActionPreference: fail on any non-zero exit code.
+function Invoke-Native {
+  $output = & $args[0] $args[1..($args.Count - 1)]
+  if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code ${LASTEXITCODE}: $($args -join ' ')" }
+  return $output
 }
 
-$tmp = Join-Path ([IO.Path]::GetTempPath()) $asset.name
-Write-Host "Downloading $($asset.browser_download_url)"
 if ($DryRun) {
   Write-Host "[DryRun] would create branch $branch, bump version.txt to $latest and open a pull request."
   return
 }
+
+# Every step is idempotent so that a partially failed run is repaired by the next one.
+$branchExists = [bool](Invoke-Native git ls-remote --heads origin $branch)
+$prCount = [int](Invoke-Native gh pr list --head $branch --state all --json number --jq 'length')
+if ($prCount -gt 0) {
+  Write-Host "A pull request already exists for $branch."
+  # Pull requests opened with GITHUB_TOKEN do not trigger workflows: make sure the checks were started.
+  $ciRuns = @(Invoke-Native gh run list --branch $branch --json workflowName --jq '.[].workflowName') -contains 'CI'
+  if (-not $ciRuns) {
+    Write-Host 'No CI run found for this branch, starting it.'
+    Invoke-Native gh workflow run ci.yml --ref $branch | Out-Null
+  }
+  return
+}
+
+$tmp = Join-Path ([IO.Path]::GetTempPath()) $asset.name
+Write-Host "Downloading $($asset.browser_download_url)"
 Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tmp
 $sha256 = (Get-FileHash $tmp -Algorithm SHA256).Hash
 Remove-Item $tmp
 
-git config user.name 'github-actions[bot]'
-git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-git checkout -b $branch
-[IO.File]::WriteAllText($versionFile, "$latest`n")
-git add version.txt
-git commit -m "Update NanaZip to $latest"
-git push origin $branch
+if ($branchExists) {
+  Write-Host "Branch $branch already exists without pull request, creating the pull request."
+} else {
+  Invoke-Native git config user.name 'github-actions[bot]' | Out-Null
+  Invoke-Native git config user.email '41898282+github-actions[bot]@users.noreply.github.com' | Out-Null
+  Invoke-Native git checkout -b $branch | Out-Null
+  [IO.File]::WriteAllText($versionFile, "$latest`n")
+  Invoke-Native git add version.txt | Out-Null
+  Invoke-Native git commit -m "Update NanaZip to $latest" | Out-Null
+  Invoke-Native git push origin $branch | Out-Null
+}
 
 $body = @"
 New stable NanaZip release detected: **$($release.tag_name)** (was ``$current``).
@@ -78,11 +98,12 @@ New stable NanaZip release detected: **$($release.tag_name)** (was ``$current``)
 ## Checklist
 - [ ] Checks of this PR are green
 - [ ] ``git fetch && git checkout $branch``
-- [ ] ``.\packVersion.ps1`` (packs and, on confirmation, pushes to Chocolatey)
-- [ ] ``.\tests\Test-InSandbox.ps1`` and a local ``choco upgrade nanazip -s . -f``
+- [ ] ``.\packVersion.ps1`` (packs, tests the package in Windows Sandbox, then asks before pushing to Chocolatey)
+- [ ] A local ``choco upgrade nanazip -s . -f``
 - [ ] Merge this PR once the package is published
 "@
 $body | gh pr create --base master --head $branch --title "Update NanaZip to $latest" --body-file -
+if ($LASTEXITCODE -ne 0) { throw "gh pr create failed with exit code $LASTEXITCODE" }
 
 # Pull requests opened with GITHUB_TOKEN do not trigger workflows: run the checks explicitly.
-gh workflow run ci.yml --ref $branch
+Invoke-Native gh workflow run ci.yml --ref $branch | Out-Null

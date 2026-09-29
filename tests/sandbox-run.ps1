@@ -89,6 +89,14 @@ Step 'Final uninstall' {
 
 Write-Host "`n================ SUMMARY ================" -ForegroundColor Cyan
 $results.GetEnumerator() | ForEach-Object { Write-Host ("{0,-45} {1}" -f $_.Key, $(if ($_.Value) { 'OK' } else { 'FAILED' })) }
-$results.GetEnumerator() | ForEach-Object { "{0}`t{1}" -f $_.Key, $_.Value } | Set-Content "$resultDir\summary.txt"
+# Written under a temporary name then renamed, so the host never reads a partial file
+$results.GetEnumerator() | ForEach-Object { "{0}`t{1}" -f $_.Key, $_.Value } | Set-Content "$resultDir\summary.tmp"
+Move-Item "$resultDir\summary.tmp" "$resultDir\summary.txt" -Force
 Stop-Transcript | Out-Null
-Write-Host "`nLogs saved on the host (results folder). You can close this window / the Sandbox."
+if ($config.AutoClose) {
+  Write-Host "`nTests finished, closing the Sandbox..."
+  Start-Sleep -Seconds 3
+  Stop-Computer -Force
+} else {
+  Write-Host "`nLogs saved on the host (results folder). You can close this window / the Sandbox."
+}
