@@ -6,7 +6,9 @@ param (
   [Alias('np')]
     [switch]$noPrompt = $false,
   [Alias('v')]
-    [string]$fversion = [string]::Empty
+    [string]$fversion = [string]::Empty,
+  [Alias('ss')]
+    [switch]$skipSandbox = $false
 )
 if ($Debug) { $DebugPreference = 'Continue' }
 
@@ -195,11 +197,32 @@ try {
   RestoreFiles $backups
 }
 
-## Push choco package ##
-if(!$noPrompt) {
-  $confirmation = Read-Host "Push package [Y/n]?"
-  $confirmation = ('y',$confirmation)[[bool]$confirmation]
-  if($confirmation -eq 'n') {exit}
-}
+## Test the package in Windows Sandbox before any push ##
 $packFileName = Join-Path $PSScriptRoot ($packageId + '.' + $latestRelease.Version + '.nupkg')
+if ($skipSandbox) {
+  Write-Warning "Sandbox test skipped (-skipSandbox): the package is pushed untested."
+} else {
+  if (-not (Get-Command WindowsSandbox.exe -ErrorAction SilentlyContinue)) {
+    throw "Windows Sandbox is not available (see README to enable it). Use -skipSandbox to bypass the test."
+  }
+  Write-Host "Testing the package in Windows Sandbox (a few minutes)..."
+  $sandboxOk = @(& (Join-Path $PSScriptRoot 'tests\Test-InSandbox.ps1') -Package $packFileName -Wait)[-1]
+  if ($sandboxOk -ne $true) {
+    Write-Error "Sandbox tests FAILED, package NOT pushed. Package: $packFileName"
+    exit 1
+  }
+  Write-Host "Sandbox tests passed." -ForegroundColor Green
+}
+
+## Keep version.txt in sync with the packaged version ##
+$versionFile = Join-Path $PSScriptRoot 'version.txt'
+if (-not (Test-Path $versionFile) -or (Get-Content $versionFile -Raw).Trim() -ne $latestRelease.Version) {
+  [System.IO.File]::WriteAllText($versionFile, "$($latestRelease.Version)`n")
+  Write-Warning "version.txt updated to $($latestRelease.Version), don't forget to commit it."
+}
+
+## Push choco package (always asks, even with -noPrompt) ##
+$confirmation = Read-Host "Push package [Y/n]?"
+$confirmation = ('y',$confirmation)[[bool]$confirmation]
+if($confirmation -eq 'n') {exit}
 choco push $packFileName

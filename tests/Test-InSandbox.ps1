@@ -8,11 +8,17 @@
   (none = upgrade test skipped).
 .PARAMETER NoLaunch
   Only prepare the staging folder and the .wsb file, do not start the Sandbox.
+.PARAMETER Wait
+  Wait for the tests to finish, close the Sandbox afterwards and return $true only if every step succeeded.
+.PARAMETER TimeoutMinutes
+  Maximum time to wait with -Wait (default 20).
 #>
 param (
   [string]$Package,
   [string]$OldPackage,
-  [switch]$NoLaunch
+  [switch]$NoLaunch,
+  [switch]$Wait,
+  [int]$TimeoutMinutes = 20
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -47,7 +53,7 @@ Remove-Item (Join-Path $work '*') -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $pkgDir, $results -ItemType Directory -Force | Out-Null
 Copy-Item $Package $pkgDir
 if ($OldPackage) { Copy-Item $OldPackage $pkgDir }
-@{ NewVersion = $newVersion; OldVersion = $oldVersion } | ConvertTo-Json | Set-Content (Join-Path $pkgDir 'config.json')
+@{ NewVersion = $newVersion; OldVersion = $oldVersion; AutoClose = [bool]$Wait } | ConvertTo-Json | Set-Content (Join-Path $pkgDir 'config.json')
 Copy-Item (Join-Path $PSScriptRoot 'sandbox-run.ps1') $pkgDir
 
 $wsb = Join-Path $work 'nanazip-test.wsb'
@@ -83,3 +89,25 @@ if ($NoLaunch) { return }
 
 Write-Host "Starting Windows Sandbox..."
 Start-Process WindowsSandbox.exe -ArgumentList "`"$wsb`""
+
+if (-not $Wait) { return }
+
+# Wait for the summary written by sandbox-run.ps1, then report the result
+$summaryFile = Join-Path $results 'summary.txt'
+$deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+Write-Host "Waiting for the tests to finish (timeout: $TimeoutMinutes min)..."
+while (-not (Test-Path $summaryFile) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
+if (-not (Test-Path $summaryFile)) {
+  Write-Warning "Timeout: no result after $TimeoutMinutes minutes. Log: $(Join-Path $results 'sandbox.log')"
+  return $false
+}
+
+$steps = @(Get-Content $summaryFile | Where-Object { $_ } | ForEach-Object {
+  $name, $value = $_ -split "`t"
+  [pscustomobject]@{ Step = $name; Passed = ($value -eq 'True') }
+})
+foreach ($s in $steps) {
+  Write-Host ("  {0,-45} {1}" -f $s.Step, $(if ($s.Passed) { 'OK' } else { 'FAILED' })) -ForegroundColor $(if ($s.Passed) { 'Green' } else { 'Red' })
+}
+Write-Host "Log: $(Join-Path $results 'sandbox.log')"
+return [bool](($steps.Count -gt 0) -and -not ($steps | Where-Object { -not $_.Passed }))
