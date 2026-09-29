@@ -10,12 +10,12 @@ $oldVersion = $config.OldVersion
 $results = [ordered]@{}
 function Step($name, [scriptblock]$body) {
   Write-Host "`n=== $name ===" -ForegroundColor Cyan
-  # The script block also emits native command output (choco...): show it, and take the status
-  # only from the last emitted value, which must be exactly $true.
+  # The script block also emits native command output (choco...): show it as it comes, and take the
+  # status only from the last emitted value, which must be exactly $true.
+  $last = $null
   try {
-    $out = @(& $body)
-    if ($out.Count -gt 1) { $out[0..($out.Count - 2)] | Out-Host }
-    $ok = ($out.Count -gt 0) -and ($out[-1] -is [bool]) -and $out[-1]
+    & $body | ForEach-Object { $last = $_; if ($_ -isnot [bool]) { $_ | Out-Host } }
+    $ok = ($last -is [bool]) -and $last
   } catch { Write-Host $_ -ForegroundColor Red; $ok = $false }
   $results[$name] = [bool]$ok
   Write-Host ("{0}: {1}" -f $name, $(if ($ok) { 'OK' } else { 'FAILED' })) -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
