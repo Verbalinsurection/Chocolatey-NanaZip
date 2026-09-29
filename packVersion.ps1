@@ -195,6 +195,13 @@ try {
   RestoreFiles $backups
 }
 
+## Keep version.txt in sync with the packaged version ##
+$versionFile = Join-Path $PSScriptRoot 'version.txt'
+if (-not (Test-Path $versionFile) -or (Get-Content $versionFile -Raw).Trim() -ne $latestRelease.Version) {
+  [System.IO.File]::WriteAllText($versionFile, "$($latestRelease.Version)`n")
+  Write-Warning "version.txt updated to $($latestRelease.Version), don't forget to commit it."
+}
+
 ## Push choco package ##
 if(!$noPrompt) {
   $confirmation = Read-Host "Push package [Y/n]?"

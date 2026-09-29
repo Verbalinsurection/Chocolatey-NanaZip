@@ -54,3 +54,17 @@ Sandbox window and saved on the host in `%TEMP%\nanazip-sandbox\results` (`summa
 Without an old package, the upgrade test is skipped.
 
 To test a locally packed package on your own machine: `choco upgrade nanazip -s . -f` (`--force` reinstalls the same version).
+
+## Automation (GitHub Actions)
+
+- `ci.yml` (pull requests, `master`, manual): lints the PowerShell scripts and checks that the package can be
+  packed (`.github/scripts/ci-pack-check.ps1`, placeholders replaced by dummy values).
+- `new-release.yml` (daily, manual): compares the latest stable NanaZip release with `version.txt`. If it is newer,
+  it opens a pull request `Update NanaZip to <version>` (branch `release/nanazip-<version>`) that bumps `version.txt`
+  and gives the release link and the SHA256 of the asset.
+
+Publishing stays manual: check out the pull request branch, run `.\packVersion.ps1`, test the package
+(`.\tests\Test-InSandbox.ps1`, `choco upgrade nanazip -s . -f`), let the script push it to Chocolatey, then merge the PR.
+
+Repository setting required: *Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create
+and approve pull requests*.
