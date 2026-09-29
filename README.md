@@ -28,4 +28,29 @@ then restores the templates.
 
 Set `GITHUB_TOKEN` to avoid the anonymous GitHub API rate limit.
 
-To test a locally packed package: `choco upgrade nanazip -s . -f` (`--force` reinstalls the same version).
+### Testing in Windows Sandbox
+
+`tests\Test-InSandbox.ps1` tests the packed package in a disposable Windows Sandbox (feature to enable once:
+`Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`, admin, then reboot).
+It is the only script to run by hand; `tests\sandbox-run.ps1` runs inside the Sandbox and needs no arguments.
+
+```powershell
+.\packVersion.ps1                 # 1. pack the new version (creates nanazip.<version>.nupkg)
+.\tests\Test-InSandbox.ps1        # 2. test it
+```
+
+The script picks the packages itself from the `nanazip.*.nupkg` files at the repository root: the newest one is
+tested, the one just before it is used as the "old" package for the upgrade test. Options (all optional):
+
+```powershell
+.\tests\Test-InSandbox.ps1 -Package .\nanazip.7.0.1843.nupkg      # package to test
+.\tests\Test-InSandbox.ps1 -OldPackage .\nanazip.6.5.1800.nupkg   # older package for the upgrade test
+.\tests\Test-InSandbox.ps1 -NoLaunch                              # prepare only, do not start the Sandbox
+```
+
+Steps run in the Sandbox: fresh install, uninstall, install of the old version, upgrade, forced reinstall, final
+uninstall. After each step the installed NanaZip version (Appx and Chocolatey) is checked. Results are shown in the
+Sandbox window and saved on the host in `%TEMP%\nanazip-sandbox\results` (`summary.txt`, `sandbox.log`).
+Without an old package, the upgrade test is skipped.
+
+To test a locally packed package on your own machine: `choco upgrade nanazip -s . -f` (`--force` reinstalls the same version).
