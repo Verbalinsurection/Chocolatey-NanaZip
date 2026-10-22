@@ -2,6 +2,10 @@
 .SYNOPSIS
   Looks for a NanaZip release newer than the one recorded in version.txt and, if found,
   opens a pull request that bumps version.txt.
+.PARAMETER RecreateClosed
+  Treat a closed (not merged) pull request for the release branch as not handled and open a new one.
+  Set by the manual run of the workflow (env RECREATE_CLOSED=true); the daily run never recreates a pull
+  request that was closed on purpose.
 .PARAMETER DryRun
   Only print what would be done (no download, no git, no pull request).
 .NOTES
@@ -9,7 +13,8 @@
 #>
 param (
   [string]$UpstreamRepo = 'M2Team/NanaZip',
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$RecreateClosed = ($env:RECREATE_CLOSED -eq 'true')
 )
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
@@ -86,7 +91,8 @@ $prsJson = ((Invoke-Native gh pr list --head $branch --state all --json 'number,
 $prs = @(foreach ($pr in $prsJson) { $pr })
 if ($prs.Count -gt 0) {
   # Closed or merged: already handled (the branch may have been deleted), never start anything.
-  if (-not ($prs | Where-Object { $_.state -eq 'OPEN' })) {
+  $recreate = $RecreateClosed -and -not ($prs | Where-Object { $_.state -eq 'MERGED' })
+  if (-not ($prs | Where-Object { $_.state -eq 'OPEN' }) -and -not $recreate) {
     Write-Host "The pull request for $branch was already handled ($($prs[0].state)), nothing to do."
     return
   }

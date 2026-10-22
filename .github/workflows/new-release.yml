@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '17 6 * * *'
   workflow_dispatch:
+    inputs:
+      recreate_closed:
+        description: 'Open a new pull request even if the previous one for this version was closed'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -22,4 +27,5 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECREATE_CLOSED: ${{ inputs.recreate_closed }}
         run: ./.github/scripts/check-release.ps1
