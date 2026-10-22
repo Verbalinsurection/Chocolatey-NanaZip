@@ -49,19 +49,34 @@ function GetGithubInfos {
     [string]$repo
   )
 
-  $url = "https://api.github.com/repos/$repo/releases?per_page=20"
-  Write-Debug "Get Github infos: $url"
+  # The releases *list* endpoint sometimes answers "200 []" (observed about one call in three), so it is not
+  # used: /releases/latest gives the newest stable release, /releases/tags/<tag> a given one. A few retries
+  # guard against other glitches.
   $headers = @{}
   if ($env:GITHUB_TOKEN) { $headers.Authorization = "Bearer $env:GITHUB_TOKEN" }
-  $releases = Invoke-RestMethod -Uri $url -Headers $headers
-
-  if ($fversion -eq [string]::Empty) {
-    $release = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
+  $urls = if ($fversion -eq [string]::Empty) {
+    @("https://api.github.com/repos/$repo/releases/latest")
   } else {
-    $release = $releases | Where-Object { $_.tag_name -eq $fversion -or $_.tag_name -eq "v$fversion" } | Select-Object -First 1
+    $tag = $fversion.TrimStart('v')
+    @("https://api.github.com/repos/$repo/releases/tags/$tag", "https://api.github.com/repos/$repo/releases/tags/v$tag")
+  }
+
+  $release = $null
+  foreach ($url in $urls) {
+    Write-Debug "Get Github infos: $url"
+    for ($attempt = 1; $attempt -le 4 -and -not $release; $attempt++) {
+      if ($attempt -gt 1) { Write-Debug "  retry $attempt"; Start-Sleep -Seconds 5 }
+      try {
+        $candidate = Invoke-RestMethod -Uri $url -Headers $headers
+        if ($candidate.tag_name -and -not $candidate.draft -and ($fversion -ne [string]::Empty -or -not $candidate.prerelease)) { $release = $candidate }
+      } catch {
+        if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 404) { break }
+        Write-Debug "  GitHub API error: $_"
+      }
+    }
+    if ($release) { break }
   }
   if (-not $release) { throw "Release not found on $repo" }
-
   $asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
   if (-not $asset) { throw "Asset NanaZip_*.msixbundle not found in release $($release.tag_name)" }
   Write-Debug "  Find asset x86_64: $($asset.name)"

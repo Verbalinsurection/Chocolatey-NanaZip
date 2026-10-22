@@ -22,13 +22,19 @@ function Get-NormalizedVersion([string]$tag) {
 
 $current = (Get-Content $versionFile -Raw).Trim()
 
-$headers = @{}
-$token = if ($env:GH_TOKEN) { $env:GH_TOKEN } else { $env:GITHUB_TOKEN }
-if ($token) { $headers.Authorization = "Bearer $token" }
-$releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$UpstreamRepo/releases?per_page=20" -Headers $headers
-$release = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
-if (-not $release) { throw "No stable release found on $UpstreamRepo" }
-$asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
+# Filtering is done by gh/jq (same result on Windows PowerShell 5.1 and PowerShell 7). Authenticated through
+# GH_TOKEN in GitHub Actions; the same call works locally with `gh auth login`.
+# /releases/latest returns the newest non-draft, non-prerelease release. The releases *list* endpoint was
+# observed answering "200 []" about one call in three, so it is not used. A few retries guard against other glitches.
+$release = $null
+for ($attempt = 1; $attempt -le 4 -and -not $release; $attempt++) {
+  if ($attempt -gt 1) { Write-Warning "No usable answer from the GitHub API (attempt $($attempt - 1)/4), retrying in 10 s."; Start-Sleep -Seconds 10 }
+  $releaseJson = gh api "repos/$UpstreamRepo/releases/latest"
+  if ($LASTEXITCODE -ne 0) { throw "gh api failed with exit code $LASTEXITCODE" }
+  $candidate = ($releaseJson -join "`n") | ConvertFrom-Json
+  if ($candidate -and $candidate.tag_name -and -not $candidate.prerelease -and -not $candidate.draft) { $release = $candidate }
+}
+if (-not $release) { throw "No stable release found on $UpstreamRepo after 4 attempts (last answer: $($releaseJson -join ' '))." }$asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
 if (-not $asset) { throw "Asset NanaZip_*.msixbundle not found in release $($release.tag_name)" }
 
 $latest = Get-NormalizedVersion $release.tag_name
