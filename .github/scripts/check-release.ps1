@@ -24,12 +24,17 @@ $current = (Get-Content $versionFile -Raw).Trim()
 
 # Filtering is done by gh/jq (same result on Windows PowerShell 5.1 and PowerShell 7). Authenticated through
 # GH_TOKEN in GitHub Actions; the same call works locally with `gh auth login`.
-$releaseJson = gh api "repos/$UpstreamRepo/releases?per_page=30" --jq '[.[] | select((.prerelease | not) and (.draft | not))][0]'
-if ($LASTEXITCODE -ne 0) { throw "gh api failed with exit code $LASTEXITCODE" }
-$release = ($releaseJson -join "`n") | ConvertFrom-Json
+# The answer was observed empty once on a runner while the same call worked minutes later: retry a few times.
+$release = $null
+for ($attempt = 1; $attempt -le 3 -and -not $release; $attempt++) {
+  if ($attempt -gt 1) { Write-Warning "No stable release in the answer (attempt $($attempt - 1)/3), retrying in 15 s."; Start-Sleep -Seconds 15 }
+  $releaseJson = gh api "repos/$UpstreamRepo/releases?per_page=30" --jq '[.[] | select((.prerelease | not) and (.draft | not))][0]'
+  if ($LASTEXITCODE -ne 0) { throw "gh api failed with exit code $LASTEXITCODE" }
+  $release = ($releaseJson -join "`n") | ConvertFrom-Json
+}
 if (-not $release) {
-  $recent = gh api "repos/$UpstreamRepo/releases?per_page=5" --jq '.[] | "\(.tag_name) prerelease=\(.prerelease) draft=\(.draft)"'
-  throw "No stable release found on $UpstreamRepo. Raw answer: [$releaseJson]. Most recent releases: $($recent -join ', ')"
+  $count = gh api "repos/$UpstreamRepo/releases?per_page=30" --jq 'length'
+  throw "No stable release found on $UpstreamRepo after 3 attempts (answer: [$releaseJson], releases returned: $count)."
 }$asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
 if (-not $asset) { throw "Asset NanaZip_*.msixbundle not found in release $($release.tag_name)" }
 
