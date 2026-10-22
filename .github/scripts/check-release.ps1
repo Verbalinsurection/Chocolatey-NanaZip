@@ -26,6 +26,7 @@ $headers = @{}
 $token = if ($env:GH_TOKEN) { $env:GH_TOKEN } else { $env:GITHUB_TOKEN }
 if ($token) { $headers.Authorization = "Bearer $token" }
 $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$UpstreamRepo/releases?per_page=20" -Headers $headers
+Write-Host "DIAG type=$($releases.GetType().FullName) count=$(@($releases).Count) PS=$($PSVersionTable.PSVersion)"; Write-Host ("DIAG first: " + (($releases | Select-Object -First 3 | ForEach-Object { "$($_.tag_name)/pre=$($_.prerelease)/draft=$($_.draft)" }) -join ', '))
 $release = $releases | Where-Object { -not $_.prerelease -and -not $_.draft } | Select-Object -First 1
 if (-not $release) { throw "No stable release found on $UpstreamRepo" }
 $asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
