@@ -61,7 +61,9 @@ function Invoke-Native {
 }
 
 # The CI run started by the dispatch is not attached to the pull request (empty checks list), so wait for
-# its end and report the result in a pull request comment. Never fatal.
+# its end and report the result in a pull request comment. Never fatal, and bounded in time: the run status
+# can lag behind its jobs on GitHub's side (a run was seen "in progress" long after its job had succeeded),
+# so the jobs are looked at as well.
 function Write-CiResult([string]$Branch, [string]$PullRequest) {
   try {
     $run = $null
@@ -71,15 +73,24 @@ function Write-CiResult([string]$Branch, [string]$PullRequest) {
       $run = foreach ($r in $json) { $r }
     }
     if (-not $run) { throw 'CI run not found' }
-    Invoke-Native gh run watch $run.databaseId --interval 5 | Out-Null
-    $conclusion = ((Invoke-Native gh run view $run.databaseId --json conclusion) -join "`n" | ConvertFrom-Json).conclusion
+
+    $conclusion = $null
+    for ($i = 0; $i -lt 60 -and -not $conclusion; $i++) {   # 5 minutes at most
+      Start-Sleep -Seconds 5
+      $info = (Invoke-Native gh run view $run.databaseId --json 'status,conclusion,jobs') -join "`n" | ConvertFrom-Json
+      if ($info.status -eq 'completed') { $conclusion = $info.conclusion; continue }
+      $jobs = @(foreach ($j in $info.jobs) { $j })
+      if ($jobs.Count -gt 0 -and -not ($jobs | Where-Object { $_.status -ne 'completed' })) {
+        $conclusion = if ($jobs | Where-Object { $_.conclusion -ne 'success' }) { 'failure' } else { 'success' }
+      }
+    }
+    if (-not $conclusion) { $conclusion = 'still running after 5 minutes' }
     Invoke-Native gh pr comment $PullRequest --body "**CI: $conclusion** - $($run.url)" | Out-Null
     Write-Host "CI result posted on the pull request: $conclusion"
   } catch {
     Write-Warning "Could not report the CI result on the pull request: $_"
   }
 }
-
 if ($DryRun) {
   Write-Host "[DryRun] would create branch $branch, bump version.txt to $latest and open a pull request."
   return
