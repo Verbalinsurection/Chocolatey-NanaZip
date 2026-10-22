@@ -89,20 +89,22 @@ if ($DryRun) {
 $branchExists = [bool](Invoke-Native git ls-remote --heads origin $branch)
 $prsJson = ((Invoke-Native gh pr list --head $branch --state all --json 'number,state') -join "`n") | ConvertFrom-Json
 $prs = @(foreach ($pr in $prsJson) { $pr })
-if ($prs.Count -gt 0) {
-  # Closed or merged: already handled (the branch may have been deleted), never start anything.
-  $recreate = $RecreateClosed -and -not ($prs | Where-Object { $_.state -eq 'MERGED' })
-  if (-not ($prs | Where-Object { $_.state -eq 'OPEN' }) -and -not $recreate) {
-    Write-Host "The pull request for $branch was already handled ($($prs[0].state)), nothing to do."
-    return
-  }
+$openPrs = @($prs | Where-Object { $_.state -eq 'OPEN' })
+$merged = @($prs | Where-Object { $_.state -eq 'MERGED' })
+# A closed (not merged) pull request is a refusal: it is only ignored when recreating is requested.
+$ignoreClosed = $RecreateClosed -and $merged.Count -eq 0
+if ($openPrs.Count -eq 0 -and $prs.Count -gt 0 -and -not $ignoreClosed) {
+  Write-Host "The pull request for $branch was already handled ($($prs[0].state)), nothing to do."
+  return
+}
+if ($openPrs.Count -gt 0) {
   Write-Host "A pull request is already open for $branch."
   # Pull requests opened with GITHUB_TOKEN do not trigger workflows: make sure the checks were started.
   $ciRuns = @(Invoke-Native gh run list --branch $branch --json workflowName --jq '.[].workflowName') -contains 'CI'
   if (-not $ciRuns) {
     Write-Host 'No CI run found for this branch, starting it.'
     Invoke-Native gh workflow run ci.yml --ref $branch | Out-Null
-    Write-CiResult $branch ([string]$prs[0].number)
+    Write-CiResult $branch ([string]$openPrs[0].number)
   }
   return
 }
