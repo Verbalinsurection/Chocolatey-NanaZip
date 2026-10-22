@@ -24,18 +24,17 @@ $current = (Get-Content $versionFile -Raw).Trim()
 
 # Filtering is done by gh/jq (same result on Windows PowerShell 5.1 and PowerShell 7). Authenticated through
 # GH_TOKEN in GitHub Actions; the same call works locally with `gh auth login`.
-# The answer was observed empty once on a runner while the same call worked minutes later: retry a few times.
+# /releases/latest returns the newest non-draft, non-prerelease release. The releases *list* endpoint was
+# observed answering "200 []" about one call in three, so it is not used. A few retries guard against other glitches.
 $release = $null
-for ($attempt = 1; $attempt -le 3 -and -not $release; $attempt++) {
-  if ($attempt -gt 1) { Write-Warning "No stable release in the answer (attempt $($attempt - 1)/3), retrying in 15 s."; Start-Sleep -Seconds 15 }
-  $releaseJson = gh api "repos/$UpstreamRepo/releases?per_page=30" --jq '[.[] | select((.prerelease | not) and (.draft | not))][0]'
+for ($attempt = 1; $attempt -le 4 -and -not $release; $attempt++) {
+  if ($attempt -gt 1) { Write-Warning "No usable answer from the GitHub API (attempt $($attempt - 1)/4), retrying in 10 s."; Start-Sleep -Seconds 10 }
+  $releaseJson = gh api "repos/$UpstreamRepo/releases/latest"
   if ($LASTEXITCODE -ne 0) { throw "gh api failed with exit code $LASTEXITCODE" }
-  $release = ($releaseJson -join "`n") | ConvertFrom-Json
+  $candidate = ($releaseJson -join "`n") | ConvertFrom-Json
+  if ($candidate -and $candidate.tag_name -and -not $candidate.prerelease -and -not $candidate.draft) { $release = $candidate }
 }
-if (-not $release) {
-  $count = gh api "repos/$UpstreamRepo/releases?per_page=30" --jq 'length'
-  throw "No stable release found on $UpstreamRepo after 3 attempts (answer: [$releaseJson], releases returned: $count)."
-}$asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
+if (-not $release) { throw "No stable release found on $UpstreamRepo after 4 attempts (last answer: $($releaseJson -join ' '))." }$asset = $release.assets | Where-Object { $_.name -match '^NanaZip_.*\.msixbundle$' } | Select-Object -First 1
 if (-not $asset) { throw "Asset NanaZip_*.msixbundle not found in release $($release.tag_name)" }
 
 $latest = Get-NormalizedVersion $release.tag_name
