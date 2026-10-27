@@ -25,6 +25,28 @@ if ($installed) {
   }
 }
 
+# Add-AppxPackage -ForceApplicationShutdown only closes the apps of the package. The shell extension
+# (context menu) is loaded by other processes, typically a dllhost.exe COM surrogate or explorer.exe, which then
+# keep the package in use (error 0x80073D02). Stop the dllhost.exe / NanaZip processes that have a module of the
+# installed package loaded: Windows restarts the surrogate on demand. explorer.exe is never stopped.
+if ($installed) {
+  $installFolder = $installed.InstallLocation
+  Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+    $process = $_
+    try {
+      $usesPackage = ($process.Path -like "$installFolder\*") -or
+        ($process.Modules | Where-Object { $_.FileName -like "$installFolder\*" })
+      if ($usesPackage -and ($process.Name -eq 'dllhost' -or $process.Name -like 'NanaZip*' -or $process.Name -eq '7zG')) {
+        Write-Host "Stopping $($process.Name) (PID $($process.Id)) which uses the installed NanaZip package..."
+        Stop-Process -Id $process.Id -Force -ErrorAction Stop
+      }
+    } catch {
+      Write-Verbose "Skipping $($process.Name) (PID $($process.Id)): $_"
+    }
+  }
+  # let Windows release the files
+  Start-Sleep -Seconds 2
+}
 Write-Host "Deploying $fileName (this can take a minute or two)..."
 
 # Run in Windows PowerShell so the Appx module loads regardless of the host
